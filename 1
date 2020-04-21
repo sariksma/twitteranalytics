@@ -1,0 +1,267 @@
+#################################################################################################
+# Twitter text data mining and analyses                                                         #
+# SAPPK - Institut Teknologi Bandung                                                            #
+#                                                                                               #
+# Script names  : twitter_analysis.R                                                            #
+# Purpose       : This scripts contains lines of commands and function to perform basic         #
+#                 tasks for retrieving tweets and analyzing tweets                              #
+# Programmer    : Adenantera Dwicaksono                                                         #
+# Acknowledgm't : This script was prepared based on various sources that are available online   #
+#                 Full credits to Rohit Nair, Yanchang Zhao, Devid Haryalesmana                 #
+#                                                                                               #
+#################################################################################################
+
+
+################################################################################################# 
+#
+# Requirements:
+#   -  Set your working directory in your local folder
+#   -  Twitter's API consumer and access token keys
+#   -  The following packages need to be installed : twitteR, tm, wordcloud, plyr, stringr
+#   -  A .txt file containing Indonesia's stop words need to be downloaded from xxx and stored 
+#      to the working directory
+#   -  Two .csv files containing positive and negative words need to be downloaded from xxx and
+#      stored in the working directory 
+#
+################################################################################################# 
+
+
+#################################################################################################
+#
+# This script performs the following steps:
+#   Step 1: Step 1: Install packages, load required library packages, and set working directories
+#   Step 2: Establish access to Twitter API
+#   Step 3: Retrieving tweets
+#   Step 4: Cleaning tweets
+#   Step 5: Analyzing tweets - patterns and frequency of words
+#   Step 6: Analyzing tweets - sentiments and polarizations
+#
+################################################################################################# 
+
+##################
+# Step 1: Install packages, load required library packages, and set working directories
+##################
+
+#The following packages are essential for running the following processes, and have been installed
+#in my machine and therefore no need to reinstall them. It the script is run in other
+#machine, these packages must have been installed 
+
+#install.packages("stringr")
+#install.packages("twitteR")
+#install.packages("tm")
+#install.packages("wordcloud")
+#install.packages("plyr")
+
+
+# open libraries of spatial utilities
+library(stringr)
+library(twitteR)
+library(tm)
+library(plyr)
+library(wordcloud)
+library(ggplot2)
+
+
+# set working directory:
+wd <- 'C:/Users/sarik/Downloads/Intro_to_Twitter_Analyses-master/Intro_to_Twitter_Analyses-master'
+setwd(wd)
+
+# check folder contents
+dir()
+
+##################
+# Step 2: Establish access to Twitter API
+##################
+
+#Store consumer and access token keys
+consumerKey <- "your_consumer_key_goes_here"
+consumerSecret <- "your_secret_consumer_key_goes_here"
+accessToken <- "your_access_token_key_goes_here"
+accessSecret <- "your_secret_access_token_key_goes_here"
+
+#set the global option for OAuthentication setting
+options(httr_oauth_cache=TRUE)
+
+# Sets up the OAuth credentials for the authentication handshake process with the twitter API
+setup_twitter_oauth(consumer_key = consumerKey, consumer_secret = consumerSecret,
+                    access_token = accessToken, access_secret = accessSecret)
+
+##################
+# Step 3: Retrieving tweets
+##################
+
+# Create a vector containing the terms that will be used to search tweets
+terms <- c("#dirumahaja")
+
+# collapse search terms using "paste" function
+search.terms <- paste(terms , collapse = " OR ")
+
+# Search tweets using the pre-specified terms
+tweets.by.terms <- searchTwitter(searchString = paste0(search.terms," -filter:retweets"), n=10000)
+
+
+##################
+# Step 4: Cleaning tweets
+##################
+
+# convert tweets to a dataframe
+tweets.df <- twListToDF(tweets.by.terms)
+
+#build a corpus (from tweets) - Corpus (the plural form of corpora) is large and structured sets of texts
+tw.corpus <- VCorpus(VectorSource(tweets.df$text))
+
+# Convert to lower case
+tw.corpus.proc <- tm_map(tw.corpus, content_transformer(tolower))
+
+# remove punctuation and numbers
+tw.corpus.proc <- tm_map(tw.corpus.proc, removePunctuation)
+tw.corpus.proc <- tm_map(tw.corpus.proc, removeNumbers)
+
+#create a user-defined function to remove URL, 'http' followed by non-space characters
+removeURL <- function(x) gsub("http[^[:space:]]*", "", x) #This is a function to remove url
+
+# remove URL using removeURL function
+tw.corpus.proc <- tm_map(tw.corpus.proc, removeURL)
+
+#create a user-defined function to remove emoticon (emoticon was converted to ASCII code)
+removeEmoticon <- function(x) gsub("[^\x01-\x7F]", "", x)
+
+#Remove emoticon using removeEmoticon function
+tw.corpus.proc <- tm_map(tw.corpus.proc, removeEmoticon)
+
+#Remove stopwords - stopwords are words that do not have any additional meaning to the core concept words
+
+#We will build our list of stop words that are suitable for indonesian tweets
+#we will use the list of stopword developed by ...
+stopwords.id <- t(read.delim("./id.stopwords.02.01.2016.txt")) # t is the transpose function
+
+# remove stopwords from tweets using our predefined Indonesian stopwords
+tw.corpus.proc <- tm_map(tw.corpus.proc, removeWords, stopwords.id)
+
+# We should anticipate that there might be some tweets writtern in English, we will remove English stopwords as well
+tw.corpus.proc <- tm_map(tw.corpus.proc, removeWords, stopwords("english"))
+
+# This step is optional, I want to know what words that are mentioned frequently except my search terms. so I also remove words that
+# I used for constructing the search terms
+tw.corpus.proc <- tm_map(tw.corpus.proc, removeWords, c(terms,"nya","pengen","kali","banget", "covid", "gue", "amp", "corona", "virus", "rumah", "orang", "poldasulsel", "polressoppeng","dirumahaja", "biar", "bikin", "hai", "udah", "ayo","semangat", "mendukung", "marilah", "langkah", "semangat", "bersatupadu", "ada","aja","yuk","gak","mari","wfh","kalo","nih"))
+
+##################
+# Step 5: Analyzing tweets - patterns and frequency of words
+##################
+tw.corpus.proc <- tm_map(tw.corpus.proc, PlainTextDocument)
+
+#Review the word frequency
+tw_tdm <- TermDocumentMatrix(tw.corpus.proc) 
+tw_tdm.mat <- as.matrix(tw_tdm) #change to matrix
+tw_tdm.mat <- tw_tdm.mat[rowSums(tw_tdm.mat)>60, ]
+tw_tdm.mat[1:10,1:10]
+
+#network of terms 
+library(igraph)
+tw_tdm.mat[tw_tdm.mat] <- 1
+termM <- tw_tdm.mat%*% t(tw_tdm.mat)
+tw_tdm.mat[1:10,1:10]
+g <- graph.adjacency(termM, weighted = T , mode = 'undirected')
+g <- simplify(g)
+V(g)$label <- V(g)$name
+V(g)$degree <- degree(g)
+
+#cluster
+comm <- cluster_edge_betweenness(g)
+plot(comm, g)
+#cluster 2
+greed <- cluster_fast_greedy(as.undirected(g))
+plot(greed, as.undirected(g))
+
+
+# Revoew word frequnency 
+tw_tdm.mat <- as.matrix(tw_tdm) #change to matrix
+tw_tdm.mat <- sort(rowSums(tw_tdm.mat),decreasing=TRUE) # Sort the words by frequency
+tw_tdm.mat <- data.frame(word = names(tw_tdm.mat),freq=tw_tdm.mat) # Change to dataframe
+head(tw_tdm.mat, 20) # view the first 20 words
+
+#Display word frequency using word cloud
+set.seed(1234)
+wordcloud(tw.corpus.proc,min.freq=10,max.words=80,scale=c(4,.5), colors=brewer.pal(8, "Dark2"),random.color=T, random.order=F)
+
+#barplot
+tw_tdm <- TermDocumentMatrix(tw.corpus.proc) 
+tw_tdm.mat <- as.matrix(tw_tdm) #change to matrix
+
+freq <- rowSums(tw_tdm.mat)
+freq <- subset(freq, freq>=70)
+barplot(freq, las=2, col = (10))
+
+
+##################
+# Step 6: Analyzing tweets - sentiments and polarizations
+##################
+# load and scan the words into R
+pos.words <- scan("./positive.csv", what = 'character')
+neg.words <- scan("./negative.csv", what = 'character')
+
+# Create a function for sentiment analysis
+sentiment.score = function(sentences, pos.words, neg.words, .progress = 'none')
+{
+  # we got a vector of sentences. plyr will handle a list
+  # or a vector as an "l" for us
+  # we want a simple array ("a") of scores back, so we use 
+  # "l" + "a" + "ply" = "laply":
+  
+  scores = laply(sentences, function(sentence, pos.words, neg.words) {
+    
+    # clean up sentences with R's regex-driven global substitute, gsub():
+    sentence = gsub('[[:punct:]]', '', sentence)
+    sentence = gsub('[[:cntrl:]]', '', sentence)
+    sentence = gsub('\\d+', '', sentence)
+    # and convert to lower case:
+    sentence = tolower(sentence)
+    
+    # split into words. str_split is in the stringr package
+    word.list = str_split(sentence, '\\s+')
+    # sometimes a list() is one level of hierarchy too much
+    words = unlist(word.list)
+    
+    # compare our words to the dictionaries of positive & negative terms
+    pos.matches = match(words, pos.words)
+    neg.matches = match(words, neg.words)
+    
+    # match() returns the position of the matched term or NA
+    # we just want a TRUE/FALSE:
+    pos.matches = !is.na(pos.matches)
+    neg.matches = !is.na(neg.matches)
+    
+    # and conveniently enough, TRUE/FALSE will be treated as 1/0 by sum():
+    score = sum(pos.matches) - sum(neg.matches)
+    
+    return(score)
+  }, pos.words, neg.words, .progress=.progress )
+  
+  scores.df = data.frame(score=scores, text=sentences)
+  return(scores.df)
+}
+
+#Apply sentiments function to the tweets
+result <- sentiment.score(tweets.df$text,pos.words,neg.words)
+
+# View the summary of the results 
+summary(result$score)
+hist(result$score, col = "yellow", main = 'Score of tweets', ylab = 'Count of tweets')
+
+count(result$score)
+
+qplot(result$score,xlab = "Score of tweets")
+
+##################
+# Step 6: Analyzing tweets - sentiments and polarizations
+##################
+
+#Extract geocodes of tweets
+tweets.loc <-tweets.df[!is.na(tweets.df$longitude),c("screenName","longitude","latitude")]
+
+#load map data
+ina.shp.2012 <- readOGR(dsn = "C:/Users/sarik/Downloads/Peta_Dasar/Peta Dasar", 
+                        layer = 'Admin_Provinsi_Indonesia')
+
+plot(ina.shp.2012)
+points(x = tweets.loc$longitude, y = tweets.loc$latitude, col = "red")
